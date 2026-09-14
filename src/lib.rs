@@ -136,22 +136,20 @@ impl Contract for X12 {
         let text = match std::str::from_utf8(stream.bytes()) {
             Ok(text) => text,
             Err(error) => {
-                return Ok(result(vec![issue(
-                    "malformed",
+                return Ok(ValidationResult::of(vec![ValidationIssue::malformed(
                     &format!("not text: {error}"),
-                    None,
                 )]));
             }
         };
         let interchange = match Interchange::parse(text) {
             Ok(interchange) => interchange,
-            Err(unsound) => return Ok(result(vec![unsound])),
+            Err(unsound) => return Ok(ValidationResult::of(vec![unsound])),
         };
         let mut issues = interchange.soundness();
         if let Some(wanted) = &self.transaction_set {
             for (ordinal, header, group) in interchange.transaction_sets() {
                 if let Some(message) = mismatch(wanted, header, group) {
-                    issues.push(issue(
+                    issues.push(ValidationIssue::new(
                         "transaction-set",
                         &message,
                         Some(format!("set {ordinal}")),
@@ -159,7 +157,7 @@ impl Contract for X12 {
                 }
             }
         }
-        Ok(result(issues))
+        Ok(ValidationResult::of(issues))
     }
 }
 
@@ -184,21 +182,6 @@ fn mismatch(wanted: &TransactionSet, header: &Segment, group: Option<&Segment>) 
     None
 }
 
-fn issue(code: &str, message: &str, path: Option<String>) -> ValidationIssue {
-    ValidationIssue {
-        code: code.to_string(),
-        message: message.to_string(),
-        path,
-    }
-}
-
-fn result(issues: Vec<ValidationIssue>) -> ValidationResult {
-    ValidationResult {
-        valid: issues.is_empty(),
-        issues,
-    }
-}
-
 /// Loads the contract a Location names: an empty reference is the bare
 /// contract, anything else a transaction set, `850` or `850:004010`.
 pub struct X12Factory;
@@ -219,20 +202,13 @@ impl ContractFactory for X12Factory {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use contract::fixture::stream_as as stream;
     use xcore::StreamId;
 
     const ORDER: &str = "ISA*00*          *00*          *ZZ*SENDER         *ZZ*RECEIVER       \
 *260908*1030*U*00401*000000001*0*P*>~GS*PO*SENDER*RECEIVER*20260908*1030*1*X*004010~\
 ST*850*0001~BEG*00*SA*PO4711**20260908~PO1*1*2*EA*10.00**VP*X001~SE*4*0001~\
 GE*1*1~IEA*1*000000001~";
-
-    fn stream(text: &str, media_type: Option<&str>) -> Stream {
-        Stream::new(
-            StreamId::new(1),
-            text.as_bytes().to_vec(),
-            media_type.map(str::to_string),
-        )
-    }
 
     #[test]
     fn a_sound_interchange_holds_bare_and_bound() {

@@ -9,6 +9,9 @@
 //! `ISA`/`IEA`, `GS`/`GE` or `ST`/`SE`; its `path` is `segment N (TAG)`.
 
 use contract::ValidationIssue;
+// The segment is the capability's: EDIFACT and X12 read the same shape
+// (ADR-0044); the syntax that cuts it out of an interchange is this file's.
+pub use contract::segment::Segment;
 
 /// The length `ISA` always has, terminator included.
 pub const ISA_LENGTH: usize = 106;
@@ -19,27 +22,6 @@ pub struct Separators {
     pub element: char,
     pub component: char,
     pub terminator: char,
-}
-
-/// One segment: a tag and its elements, each a list of components.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Segment {
-    pub tag: String,
-    pub elements: Vec<Vec<String>>,
-}
-
-impl Segment {
-    /// The components of element `index` (1-based, after the tag), or none.
-    #[must_use]
-    pub fn element(&self, index: usize) -> &[String] {
-        self.elements.get(index - 1).map_or(&[], Vec::as_slice)
-    }
-
-    /// The first component of element `index`, trimmed, or empty.
-    #[must_use]
-    pub fn simple(&self, index: usize) -> &str {
-        self.element(index).first().map_or("", |c| c.trim())
-    }
 }
 
 /// A read interchange.
@@ -56,11 +38,15 @@ impl Interchange {
     pub fn parse(text: &str) -> Result<Self, ValidationIssue> {
         let text = text.trim_start();
         if !text.starts_with("ISA") {
-            return Err(malformed("the interchange does not open with ISA"));
+            return Err(ValidationIssue::malformed(
+                "the interchange does not open with ISA",
+            ));
         }
         let head: Vec<char> = text.chars().take(ISA_LENGTH).collect();
         if head.len() < ISA_LENGTH {
-            return Err(malformed("ISA is shorter than its 106 characters"));
+            return Err(ValidationIssue::malformed(
+                "ISA is shorter than its 106 characters",
+            ));
         }
         let separators = Separators {
             element: head[3],
@@ -71,11 +57,13 @@ impl Interchange {
             || separators.element.is_alphanumeric()
             || separators.terminator.is_alphanumeric()
         {
-            return Err(malformed("ISA does not declare distinct separators"));
+            return Err(ValidationIssue::malformed(
+                "ISA does not declare distinct separators",
+            ));
         }
         let segments = segments(text, separators)?;
         if segments.is_empty() {
-            return Err(malformed("no segment"));
+            return Err(ValidationIssue::malformed("no segment"));
         }
         Ok(Self {
             separators,
@@ -114,13 +102,11 @@ impl Interchange {
     pub fn soundness(&self) -> Vec<ValidationIssue> {
         let mut issues = Vec::new();
         let at = |n: usize| format!("segment {} ({})", n + 1, self.segments[n].tag);
+        let envelope = |message: &str, n: usize| ValidationIssue::at("envelope", message, &at(n));
         let first = &self.segments[0];
         let last = self.segments.len() - 1;
         if self.segments[last].tag != "IEA" {
-            issues.push(envelope(
-                "the interchange does not close with IEA",
-                &at(last),
-            ));
+            issues.push(envelope("the interchange does not close with IEA", last));
         }
         let mut open_set: Option<(usize, String)> = None;
         let mut open_group: Option<(usize, String, usize)> = None;
@@ -131,7 +117,7 @@ impl Interchange {
                 "ST" => {
                     if let Some((start, _)) = &open_set {
                         let message = format!("ST inside the set opened at segment {}", start + 1);
-                        issues.push(envelope(&message, &at(n)));
+                        issues.push(envelope(&message, n));
                     }
                     open_set = Some((n, segment.simple(2).to_string()));
                     sets += 1;
@@ -144,19 +130,19 @@ impl Interchange {
                                 "SE counts {} segments, the set has {counted}",
                                 segment.simple(1)
                             );
-                            issues.push(envelope(&message, &at(n)));
+                            issues.push(envelope(&message, n));
                         }
                         if segment.simple(2) != control {
                             let message =
                                 format!("SE closes {}, ST opened {control}", segment.simple(2));
-                            issues.push(envelope(&message, &at(n)));
+                            issues.push(envelope(&message, n));
                         }
                     }
-                    None => issues.push(envelope("SE with no set open", &at(n))),
+                    None => issues.push(envelope("SE with no set open", n)),
                 },
                 "GS" => {
                     if open_group.is_some() {
-                        issues.push(envelope("GS inside an open group", &at(n)));
+                        issues.push(envelope("GS inside an open group", n));
                     }
                     open_group = Some((n, segment.simple(6).to_string(), sets));
                     groups += 1;
@@ -169,15 +155,15 @@ impl Interchange {
                                 "GE counts {} sets, the group has {in_group}",
                                 segment.simple(1)
                             );
-                            issues.push(envelope(&message, &at(n)));
+                            issues.push(envelope(&message, n));
                         }
                         if segment.simple(2) != control {
                             let message =
                                 format!("GE closes {}, GS opened {control}", segment.simple(2));
-                            issues.push(envelope(&message, &at(n)));
+                            issues.push(envelope(&message, n));
                         }
                     }
-                    None => issues.push(envelope("GE with no group open", &at(n))),
+                    None => issues.push(envelope("GE with no group open", n)),
                 },
                 "IEA" => {
                     if segment.simple(1).parse::<usize>().ok() != Some(groups) {
@@ -185,7 +171,7 @@ impl Interchange {
                             "IEA counts {} groups, the interchange has {groups}",
                             segment.simple(1)
                         );
-                        issues.push(envelope(&message, &at(n)));
+                        issues.push(envelope(&message, n));
                     }
                     if segment.simple(2) != first.simple(13) {
                         let message = format!(
@@ -193,17 +179,17 @@ impl Interchange {
                             segment.simple(2),
                             first.simple(13)
                         );
-                        issues.push(envelope(&message, &at(n)));
+                        issues.push(envelope(&message, n));
                     }
                 }
                 _ => {}
             }
         }
         if let Some((start, _)) = open_set {
-            issues.push(envelope("the set is never closed by SE", &at(start)));
+            issues.push(envelope("the set is never closed by SE", start));
         }
         if let Some((start, _, _)) = open_group {
-            issues.push(envelope("the group is never closed by GE", &at(start)));
+            issues.push(envelope("the group is never closed by GE", start));
         }
         issues
     }
@@ -223,34 +209,29 @@ fn segments(text: &str, s: Separators) -> Result<Vec<Segment>, ValidationIssue> 
                 .chars()
                 .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit());
         if !sound {
-            return Err(malformed(&format!("{tag:?} is not a segment identifier")));
+            return Err(ValidationIssue::malformed(&format!(
+                "{tag:?} is not a segment identifier"
+            )));
         }
+        // ISA pads its fixed-width elements with spaces, so every component is
+        // trimmed as it is read; the shared Segment answers what was read.
         let elements = parts
-            .map(|element| element.split(s.component).map(str::to_string).collect())
+            .map(|element| {
+                element
+                    .split(s.component)
+                    .map(|component| component.trim().to_string())
+                    .collect()
+            })
             .collect();
         segments.push(Segment { tag, elements });
     }
     let tail = text.trim_end();
     if !tail.is_empty() && !tail.ends_with(s.terminator) {
-        return Err(malformed("the last segment has no terminator"));
+        return Err(ValidationIssue::malformed(
+            "the last segment has no terminator",
+        ));
     }
     Ok(segments)
-}
-
-fn malformed(message: &str) -> ValidationIssue {
-    ValidationIssue {
-        code: "malformed".to_string(),
-        message: message.to_string(),
-        path: None,
-    }
-}
-
-fn envelope(message: &str, path: &str) -> ValidationIssue {
-    ValidationIssue {
-        code: "envelope".to_string(),
-        message: message.to_string(),
-        path: Some(path.to_string()),
-    }
 }
 
 #[cfg(test)]
