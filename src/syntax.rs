@@ -8,7 +8,7 @@
 //! cannot be read as segments at all, else `envelope` for a departure of
 //! `ISA`/`IEA`, `GS`/`GE` or `ST`/`SE`; its `path` is `segment N (TAG)`.
 
-use sdk::contract::ValidationIssue;
+use contract::ValidationIssue;
 // The segment is the capability's: EDIFACT and X12 read the same shape
 // (ADR-0044); the syntax that cuts it out of an interchange is this file's.
 pub use contract::segment::Segment;
