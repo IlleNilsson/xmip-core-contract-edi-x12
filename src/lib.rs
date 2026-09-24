@@ -22,7 +22,7 @@
 
 pub mod syntax;
 
-use sdk::contract::{
+use contract::{
     Contract, ContractDescriptor, ContractError, ContractFactory, ContractId, ValidationIssue,
     ValidationResult,
 };
