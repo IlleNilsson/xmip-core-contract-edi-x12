@@ -28,6 +28,7 @@ use contract::{
 };
 use stream::Stream;
 use syntax::{Interchange, Segment};
+use xcore::settings::{Applies, Kind, Presence, Setting, Settings};
 
 /// The bound transaction set: identifier, and optionally the version.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -191,6 +192,10 @@ impl ContractFactory for X12Factory {
         "edi-x12"
     }
 
+    fn settings(&self) -> &'static Settings {
+        SETTINGS
+    }
+
     fn load(&self, reference: &str) -> Result<Box<dyn Contract>, ContractError> {
         if reference.trim().is_empty() {
             return Ok(Box::new(X12::new()));
@@ -198,6 +203,18 @@ impl ContractFactory for X12Factory {
         Ok(Box::new(X12::of(TransactionSet::parse(reference)?)))
     }
 }
+
+/// What a Location gives this contract (ADR-0064, amendment 2026-09-26).
+const SETTINGS: &Settings = &Settings {
+    technology: env!("CARGO_PKG_NAME"),
+    settings: &[Setting {
+        name: "reference",
+        kind: Kind::Text,
+        presence: Presence::Optional,
+        meaning: "The transaction set, 850 or 850:004010; left out, any interchange holds.",
+        applies: Applies::Both,
+    }],
+};
 
 #[cfg(test)]
 mod tests {
@@ -272,5 +289,30 @@ GE*1*1~IEA*1*000000001~";
         assert!(TransactionSet::parse("85").is_err());
         assert!(TransactionSet::parse("850:").is_err());
         assert!(TransactionSet::parse("a:b:c").is_err());
+    }
+
+    #[test]
+    fn edi_x12_declares_its_settings_and_reads_through_them() {
+        assert!(SETTINGS.problems().is_empty(), "{:?}", SETTINGS.problems());
+        let given = |name: &str, value: &str| {
+            (
+                name.to_string(),
+                xcore::settings::Given::Text(value.to_string()),
+            )
+        };
+        assert!(X12Factory.open(Applies::Both, &[]).is_ok(), "bare");
+        let bound = X12Factory
+            .open(Applies::Receive, &[given("reference", "850:004010")])
+            .expect("bound");
+        assert!(bound.descriptor().id.0.contains("edi-x12:850:004010"));
+        let refused = X12Factory
+            .open(Applies::Send, &[given("unheard_of", "x")])
+            .err()
+            .expect("an unknown setting is refused");
+        assert!(
+            refused.message.contains("unheard_of"),
+            "{}",
+            refused.message
+        );
     }
 }
