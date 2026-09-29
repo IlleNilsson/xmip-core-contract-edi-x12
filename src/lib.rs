@@ -10,7 +10,7 @@
 //! the same control number and the right group count; every `GS` is closed
 //! by a `GE` with the same control number and the right set count; every
 //! `ST` by an `SE` with the same control number and the right segment count.
-//! That is what a partner's interchange must satisfy before any transaction
+//! That is what a Party's interchange must satisfy before any transaction
 //! set in it means anything.
 //!
 //! Conformance is the *transaction set*: a Location that names this contract
