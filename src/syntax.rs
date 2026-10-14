@@ -249,7 +249,7 @@ GE*1*1~IEA*1*000000001~";
         assert_eq!(interchange.separators().element, '*');
         assert_eq!(interchange.separators().component, '>');
         assert_eq!(interchange.segments().len(), 8);
-        assert!(interchange.soundness().is_empty());
+        assert_eq!(interchange.soundness(), [] as [ValidationIssue; 0]);
         let sets: Vec<_> = interchange.transaction_sets().collect();
         assert_eq!(sets.len(), 1);
         assert_eq!(sets[0].1.simple(1), "850");
@@ -262,7 +262,7 @@ GE*1*1~IEA*1*000000001~";
         let broken = SOUND.replace('~', "~\r\n");
         let interchange = Interchange::parse(&broken).expect("parse");
         assert_eq!(interchange.segments().len(), 8);
-        assert!(interchange.soundness().is_empty());
+        assert_eq!(interchange.soundness(), [] as [ValidationIssue; 0]);
     }
 
     #[test]
