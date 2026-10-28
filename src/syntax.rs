@@ -16,6 +16,36 @@ use contract::segment::Segment;
 /// The length `ISA` always has, terminator included.
 pub const ISA_LENGTH: usize = 106;
 
+/// The width of each `ISA` element, `ISA01` to `ISA16`, which X12 fixes;
+/// with the tag and the separators they make [`ISA_LENGTH`].
+pub const ISA_WIDTHS: [usize; 16] = [2, 10, 2, 10, 2, 15, 2, 15, 6, 4, 1, 5, 9, 1, 1, 1];
+
+/// The `ISA` elements of type AN, which X12 pads with spaces to their
+/// width: the authorization and security information and the sender and
+/// receiver identifiers. Every other `ISA` element is written as wide as
+/// it is or refused.
+const ISA_PADDED: [usize; 4] = [2, 4, 6, 8];
+
+/// `value` as `ISA` element `number` (from 0) is written: padded where
+/// X12 pads it, and refused where it is not then its width.
+fn isa_element(number: usize, mut value: String) -> Result<String, String> {
+    let element = number + 1;
+    let Some(&width) = ISA_WIDTHS.get(number) else {
+        return Err(format!("has an element ISA{element:02}, past ISA16"));
+    };
+    let length = value.chars().count();
+    if ISA_PADDED.contains(&element) && length < width {
+        value.extend(std::iter::repeat_n(' ', width - length));
+    }
+    if value.chars().count() == width {
+        Ok(value)
+    } else {
+        Err(format!(
+            "holds ISA{element:02} {value:?}, which X12 fixes at {width} characters"
+        ))
+    }
+}
+
 /// The separators an interchange declares.
 #[derive(Clone, Copy, Debug)]
 pub struct Separators {
@@ -79,6 +109,54 @@ impl Interchange {
     #[must_use]
     pub fn segments(&self) -> &[Segment] {
         &self.segments
+    }
+
+    /// The segments, to change one before the interchange is
+    /// [`written`](Self::written) again.
+    pub fn segments_mut(&mut self) -> &mut [Segment] {
+        &mut self.segments
+    }
+
+    /// The interchange written with the separators its `ISA` declares, the
+    /// `ISA` at the fixed widths of [`ISA_WIDTHS`]. X12 has no release
+    /// character: a value carrying a separator cannot be written, and is
+    /// refused by name, as is an `ISA` element that does not fit its width.
+    ///
+    /// # Errors
+    /// A value carries a separator, or an `ISA` element is not its width.
+    pub fn written(&self) -> Result<String, String> {
+        let s = self.separators;
+        let mut text = String::new();
+        for (index, segment) in self.segments.iter().enumerate() {
+            let refused = |what: String| format!("segment {} ({}) {what}", index + 1, segment.tag);
+            text.push_str(&segment.tag);
+            for (number, element) in segment.elements.iter().enumerate() {
+                text.push(s.element);
+                let mut value = String::new();
+                for (at, component) in element.iter().enumerate() {
+                    if at > 0 {
+                        value.push(s.component);
+                    }
+                    // ISA16 is the component separator itself, read as two
+                    // empty components and written back as one.
+                    let carries = component
+                        .chars()
+                        .any(|ch| ch == s.element || ch == s.terminator || ch == s.component);
+                    if carries {
+                        return Err(refused(format!(
+                            "holds {component:?}, which carries a separator"
+                        )));
+                    }
+                    value.push_str(component);
+                }
+                if segment.tag == "ISA" {
+                    value = isa_element(number, value).map_err(refused)?;
+                }
+                text.push_str(&value);
+            }
+            text.push(s.terminator);
+        }
+        Ok(text)
     }
 
     /// Every `ST`, numbered from 1, with the `GS` in force at it.
@@ -214,7 +292,8 @@ fn segments(text: &str, s: Separators) -> Result<Vec<Segment>, ValidationIssue> 
             )));
         }
         // ISA pads its fixed-width elements with spaces, so every component is
-        // trimmed as it is read; the shared Segment answers what was read.
+        // trimmed as it is read; the shared Segment answers what was read, and
+        // `written` pads the ISA back to ISA_WIDTHS.
         let elements = parts
             .map(|element| {
                 element
@@ -302,6 +381,26 @@ GE*1*1~IEA*1*000000001~";
                 .iter()
                 .any(|i| i.message.contains("never closed by GE"))
         );
+    }
+
+    #[test]
+    fn isa_is_written_back_at_its_fixed_widths() {
+        let mut interchange = Interchange::parse(SOUND).expect("parse");
+        assert_eq!(interchange.written().expect("written"), SOUND);
+        assert_eq!(interchange.segments()[0].simple(6), "SENDER");
+        interchange.segments_mut()[0].elements[5] = vec!["OTHER".into()];
+        let written = interchange.written().expect("padded");
+        assert!(written.starts_with("ISA*00*          *00*          *ZZ*OTHER          *"));
+        assert_eq!(written.find('~'), Some(ISA_LENGTH - 1));
+        interchange.segments_mut()[0].elements[5] = vec!["A SENDER LONGER THAN 15".into()];
+        let refused = interchange.written().expect_err("too wide");
+        assert!(refused.contains("ISA06"), "{refused}");
+        interchange.segments_mut()[0].elements[5] = vec!["SENDER".into()];
+        interchange.segments_mut()[0].elements[12] = vec!["1".into()];
+        let refused = interchange
+            .written()
+            .expect_err("a control number is never padded");
+        assert!(refused.contains("ISA13"), "{refused}");
     }
 
     #[test]
