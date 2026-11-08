@@ -131,11 +131,11 @@ impl Contract for X12 {
         }) {
             return Ok(true);
         }
-        Ok(stream.bytes().starts_with(b"ISA"))
+        Ok(stream.load()?.starts_with(b"ISA"))
     }
 
     fn validate(&self, stream: &Stream) -> Result<ValidationResult, ContractError> {
-        let text = match stream.text() {
+        let text = match contract::text(stream)? {
             Ok(text) => text,
             Err(error) => {
                 return Ok(ValidationResult::of(vec![ValidationIssue::malformed(
