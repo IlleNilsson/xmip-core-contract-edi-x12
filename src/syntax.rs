@@ -1,5 +1,6 @@
-//! ASC X12 syntax: reading an interchange into segments, and the soundness
-//! checks the envelope segments carry.
+//! ASC X12 syntax: an interchange read into segments, written back with its
+//! own separators, and the soundness checks the envelope segments carry.
+//! The segments are cut by the one walk, [`Walk`].
 //!
 //! The `ISA` segment is fixed at 106 characters and declares the separators
 //! by position: the element separator is the fourth character, the component
@@ -10,8 +11,10 @@
 
 use contract::ValidationIssue;
 // The segment is the capability's: EDIFACT and X12 read the same shape
-// (ADR-0044); the syntax that cuts it out of an interchange is this file's.
+// (ADR-0044); the walk that cuts it out of an interchange is this crate's.
 use contract::segment::Segment;
+
+use crate::walk::Walk;
 
 /// The length `ISA` always has, terminator included.
 pub const ISA_LENGTH: usize = 106;
@@ -66,34 +69,11 @@ impl Interchange {
     /// # Errors
     /// The one `malformed` issue when the text is not an interchange at all.
     pub fn parse(text: &str) -> Result<Self, ValidationIssue> {
-        let text = text.trim_start();
-        if !text.starts_with("ISA") {
-            return Err(ValidationIssue::malformed(
-                "the interchange does not open with ISA",
-            ));
-        }
-        let head: Vec<char> = text.chars().take(ISA_LENGTH).collect();
-        if head.len() < ISA_LENGTH {
-            return Err(ValidationIssue::malformed(
-                "ISA is shorter than its 106 characters",
-            ));
-        }
-        let separators = Separators {
-            element: head[3],
-            component: head[104],
-            terminator: head[105],
-        };
-        if separators.element == separators.terminator
-            || separators.element.is_alphanumeric()
-            || separators.terminator.is_alphanumeric()
-        {
-            return Err(ValidationIssue::malformed(
-                "ISA does not declare distinct separators",
-            ));
-        }
-        let segments = segments(text, separators)?;
-        if segments.is_empty() {
-            return Err(ValidationIssue::malformed("no segment"));
+        let walk = Walk::over(text)?;
+        let separators = walk.separators();
+        let mut segments = Vec::new();
+        for lying in walk {
+            segments.push(lying?.segment());
         }
         Ok(Self {
             separators,
@@ -271,46 +251,6 @@ impl Interchange {
         }
         issues
     }
-}
-
-fn segments(text: &str, s: Separators) -> Result<Vec<Segment>, ValidationIssue> {
-    let mut segments = Vec::new();
-    for raw in text.split(s.terminator) {
-        let raw = raw.trim_start_matches(['\r', '\n', ' ']);
-        if raw.is_empty() {
-            continue;
-        }
-        let mut parts = raw.split(s.element);
-        let tag = parts.next().unwrap_or_default().to_string();
-        let sound = (2..=3).contains(&tag.len())
-            && tag
-                .chars()
-                .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit());
-        if !sound {
-            return Err(ValidationIssue::malformed(format!(
-                "{tag:?} is not a segment identifier"
-            )));
-        }
-        // ISA pads its fixed-width elements with spaces, so every component is
-        // trimmed as it is read; the shared Segment answers what was read, and
-        // `written` pads the ISA back to ISA_WIDTHS.
-        let elements = parts
-            .map(|element| {
-                element
-                    .split(s.component)
-                    .map(|component| component.trim().to_string())
-                    .collect()
-            })
-            .collect();
-        segments.push(Segment { tag, elements });
-    }
-    let tail = text.trim_end();
-    if !tail.is_empty() && !tail.ends_with(s.terminator) {
-        return Err(ValidationIssue::malformed(
-            "the last segment has no terminator",
-        ));
-    }
-    Ok(segments)
 }
 
 #[cfg(test)]
