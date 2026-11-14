@@ -21,6 +21,7 @@
 //! would hold a set to its version's structure are the next layer here.
 
 pub mod syntax;
+pub mod walk;
 
 use contract::segment::Segment;
 use contract::{
