@@ -5,7 +5,8 @@
 //! The `ISA` segment is fixed at 106 characters and declares the separators
 //! by position: the element separator is the fourth character, the component
 //! separator the 105th, and the segment terminator the 106th, a line break
-//! among the ones it may be. Everything is read with those by the
+//! among the ones it may be. The X12 shape's one reader of the `ISA` reads
+//! them (`shape::delimiters`), and everything is read with those by the
 //! Foundation's one segment walk (`message::segment`), the line breaks and
 //! spaces before a segment skipped. What reads one segment cuts only that
 //! one and walks the rest uncut ([`Interchange::walk`], its [`Segments`]), and
@@ -25,11 +26,9 @@ use message::segment::Delimiters;
 
 use crate::segments::Segments;
 
-/// The length `ISA` always has, terminator included.
-pub const ISA_LENGTH: usize = 106;
-
 /// The width of each `ISA` element, `ISA01` to `ISA16`, which X12 fixes;
-/// with the tag and the separators they make [`ISA_LENGTH`].
+/// with the tag and the separators they make the shape's
+/// [`ISA_LENGTH`](shape::ISA_LENGTH).
 pub const ISA_WIDTHS: [usize; 16] = [2, 10, 2, 10, 2, 15, 2, 15, 6, 4, 1, 5, 9, 1, 1, 1];
 
 /// The `ISA` elements of type AN, which X12 pads with spaces to their
@@ -58,77 +57,25 @@ fn isa_element(number: usize, mut value: String) -> Result<String, String> {
     }
 }
 
-/// The separators an interchange declares.
-#[derive(Clone, Copy, Debug)]
-pub struct Separators {
-    pub element: char,
-    pub component: char,
-    pub terminator: char,
-}
-
-impl Separators {
-    /// What the walk cuts by.
-    ///
-    /// # Errors
-    /// The `malformed` issue a separator outside ASCII is: the walk reads
-    /// bytes.
-    fn delimiters(self) -> Result<Delimiters, ValidationIssue> {
-        let byte = |ch: char| u8::try_from(ch).ok().filter(u8::is_ascii);
-        match (
-            byte(self.terminator),
-            byte(self.element),
-            byte(self.component),
-        ) {
-            (Some(terminator), Some(element), Some(component)) => {
-                Ok(Delimiters::new(terminator, element, component))
-            }
-            _ => Err(ValidationIssue::malformed(
-                "ISA declares a separator outside ASCII",
-            )),
-        }
-    }
-}
-
 /// A read interchange.
 pub struct Interchange {
-    separators: Separators,
+    delimiters: Delimiters,
     segments: Vec<Segment>,
 }
 
 impl Interchange {
     /// `text`'s segments, one at a time, read with the separators its `ISA`
-    /// declares by position.
+    /// declares by position, the whitespace before it passed over.
     ///
     /// # Errors
-    /// The `malformed` issue when the text does not open with an `ISA` of
-    /// its 106 characters declaring distinct separators within ASCII.
+    /// The `malformed` issue in the shape's words when the text does not
+    /// open with an `ISA` of its 106 characters declaring distinct
+    /// separators within ASCII.
     pub fn walk(text: &str) -> Result<Segments<'_>, ValidationIssue> {
         let text = text.trim_start();
-        if !text.starts_with("ISA") {
-            return Err(ValidationIssue::malformed(
-                "the interchange does not open with ISA",
-            ));
-        }
-        let mut read = text.chars();
-        let (Some(element), Some(component), Some(terminator)) =
-            (read.nth(3), read.nth(100), read.next())
-        else {
-            return Err(ValidationIssue::malformed(
-                "ISA is shorter than its 106 characters",
-            ));
-        };
-        if element == terminator || element.is_alphanumeric() || terminator.is_alphanumeric() {
-            return Err(ValidationIssue::malformed(
-                "ISA does not declare distinct separators",
-            ));
-        }
-        let separators = Separators {
-            element,
-            component,
-            terminator,
-        };
-        let delimiters = separators.delimiters()?;
-        Ok(Segments::new(separators, delimiters, text))
+        let delimiters = shape::delimiters(text.as_bytes())
+            .map_err(|refused| ValidationIssue::malformed(refused.reason))?;
+        Ok(Segments::new(delimiters, text))
     }
 
     /// Read `text` with the separators its `ISA` declares.
@@ -137,20 +84,21 @@ impl Interchange {
     /// The one `malformed` issue when the text is not an interchange at all.
     pub fn parse(text: &str) -> Result<Self, ValidationIssue> {
         let walk = Self::walk(text)?;
-        let separators = walk.separators();
+        let delimiters = walk.delimiters();
         let mut segments = Vec::new();
         for lying in walk {
             segments.push(lying?.segment());
         }
         Ok(Self {
-            separators,
+            delimiters,
             segments,
         })
     }
 
+    /// The separators the `ISA` declares, as the walk cuts by them.
     #[must_use]
-    pub fn separators(&self) -> Separators {
-        self.separators
+    pub const fn delimiters(&self) -> Delimiters {
+        self.delimiters
     }
 
     #[must_use]
@@ -172,23 +120,26 @@ impl Interchange {
     /// # Errors
     /// A value carries a separator, or an `ISA` element is not its width.
     pub fn written(&self) -> Result<String, String> {
-        let s = self.separators;
+        // Every separator is ASCII, as the shape reads the ISA.
+        let d = self.delimiters;
+        let [separator, composite, terminator] =
+            [d.element, d.composite, d.terminator].map(char::from);
         let mut text = String::new();
         for (index, segment) in self.segments.iter().enumerate() {
             let refused = |what: String| format!("segment {} ({}) {what}", index + 1, segment.tag);
             text.push_str(&segment.tag);
             for (number, element) in segment.elements.iter().enumerate() {
-                text.push(s.element);
+                text.push(separator);
                 let mut value = String::new();
                 for (at, component) in element.iter().enumerate() {
                     if at > 0 {
-                        value.push(s.component);
+                        value.push(composite);
                     }
                     // ISA16 is the component separator itself, read as two
                     // empty components and written back as one.
                     let carries = component
                         .chars()
-                        .any(|ch| ch == s.element || ch == s.terminator || ch == s.component);
+                        .any(|ch| ch == separator || ch == terminator || ch == composite);
                     if carries {
                         return Err(refused(format!(
                             "holds {component:?}, which carries a separator"
@@ -201,7 +152,7 @@ impl Interchange {
                 }
                 text.push_str(&value);
             }
-            text.push(s.terminator);
+            text.push(terminator);
         }
         Ok(text)
     }
@@ -332,8 +283,11 @@ GE*1*1~IEA*1*000000001~";
     #[test]
     fn a_sound_interchange_reads_and_has_no_issues() {
         let interchange = Interchange::parse(SOUND).expect("parse");
-        assert_eq!(interchange.separators().element, '*');
-        assert_eq!(interchange.separators().component, '>');
+        assert_eq!(interchange.delimiters().element, b'*');
+        assert_eq!(interchange.delimiters().composite, b'>');
+        // One reader of the ISA: the shape's, whatever reads the interchange.
+        let declared = shape::delimiters(SOUND.as_bytes()).expect("declared");
+        assert_eq!(interchange.delimiters(), declared);
         assert_eq!(interchange.segments().len(), 8);
         assert_eq!(interchange.soundness(), [] as [ValidationIssue; 0]);
         let sets: Vec<_> = interchange.transaction_sets().collect();
@@ -398,7 +352,7 @@ GE*1*1~IEA*1*000000001~";
         interchange.segments_mut()[0].elements[5] = vec!["OTHER".into()];
         let written = interchange.written().expect("padded");
         assert!(written.starts_with("ISA*00*          *00*          *ZZ*OTHER          *"));
-        assert_eq!(written.find('~'), Some(ISA_LENGTH - 1));
+        assert_eq!(written.find('~'), Some(shape::ISA_LENGTH - 1));
         interchange.segments_mut()[0].elements[5] = vec!["A SENDER LONGER THAN 15".into()];
         let refused = interchange.written().expect_err("too wide");
         assert!(refused.contains("ISA06"), "{refused}");
@@ -415,19 +369,28 @@ GE*1*1~IEA*1*000000001~";
         assert!(Interchange::parse("UNB+UNOC:3+A+B'").is_err());
         assert!(Interchange::parse("ISA*00*short~").is_err());
         assert!(
-            Interchange::parse(&SOUND[..ISA_LENGTH - 1]).is_err(),
+            Interchange::parse(&SOUND[..shape::ISA_LENGTH - 1]).is_err(),
             "no terminator"
         );
         let bad_tag = SOUND.replace("BEG*", "b*");
         assert!(Interchange::parse(&bad_tag).is_err());
+        // The ISA is refused in the shape's words, as the shape reads it.
+        let refused = |text: &str| Interchange::parse(text).err().expect("refused").message;
         let same = SOUND.replace("*>~", "*>*");
-        assert!(
-            Interchange::parse(&same).is_err(),
-            "element equals terminator"
-        );
+        assert_eq!(refused(&same), "an ISA without distinct separators");
         let wide = SOUND.replace("*>~", "*>\u{a7}");
-        let refused = Interchange::parse(&wide).err().expect("outside ASCII");
-        assert_eq!(refused.message, "ISA declares a separator outside ASCII");
+        assert_eq!(refused(&wide), "an ISA with a separator outside ASCII");
+        assert_eq!(refused("UNB+UNOC:3+A+B'"), "no ISA at the head");
+        assert_eq!(
+            refused("ISA*00*short~"),
+            "an ISA shorter than its 106 characters"
+        );
+        // The whitespace before the ISA is passed over.
+        let spaced = format!("\r\n {SOUND}");
+        assert_eq!(
+            Interchange::parse(&spaced).expect("parse").segments().len(),
+            8
+        );
     }
 
     const ISA: &str = "ISA*00*          *00*          *ZZ*SENDER         *ZZ*RECEIVER       \
@@ -437,7 +400,7 @@ GE*1*1~IEA*1*000000001~";
     fn a_walk_yields_a_segment_at_a_time_and_stops_where_it_is_left() {
         let text = format!("{ISA}~ST*850*0001~BEG*00*SA*PO4711~SE*3*0001~IEA*1*000000001");
         let mut walk = Interchange::walk(&text).expect("declared");
-        assert_eq!(walk.separators().terminator, '~');
+        assert_eq!(walk.delimiters().terminator, b'~');
         assert_eq!(walk.next().expect("ISA").expect("sound").tag(), "ISA");
         let st = walk.next().expect("ST").expect("sound");
         assert_eq!(st.segment().element(1), ["850"]);

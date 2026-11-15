@@ -24,6 +24,10 @@ stream = { package = "xmip-core-stream", git = "https://github.com/IlleNilsson/x
 # The one segment walk (`message::segment`), which the X12 shape sections
 # by too: the syntax hands it the separators the ISA declares.
 message = { package = "xmip-core-message", git = "https://github.com/IlleNilsson/xmip-core-message", branch = "main" }
+# The shape of the same standard, whose reader of the `ISA` is the one
+# (`delimiters`): a contract technology depends on the shape of its own
+# standard and on no other technology (ADR-0044, amendment 2026-11-15).
+shape = { package = "xmip-core-message-edi-x12", git = "https://github.com/IlleNilsson/xmip-core-message-edi-x12", branch = "main" }
 
 [dev-dependencies]
 # The parent's Stream fixture, for the tests only (ADR-0044).

@@ -12,14 +12,11 @@ use contract::ValidationIssue;
 use contract::segment::Segment;
 use message::segment::{Delimiters, Walk};
 
-use crate::syntax::Separators;
-
 /// An interchange's segments, one at a time, in the order they lie, as
 /// [`Interchange::walk`](crate::syntax::Interchange::walk) begins them.
 /// After a refusal it yields nothing.
 #[derive(Clone, Debug)]
 pub struct Segments<'a> {
-    separators: Separators,
     delimiters: Delimiters,
     /// The text from its `ISA`, which is walked.
     text: &'a str,
@@ -28,21 +25,20 @@ pub struct Segments<'a> {
 }
 
 impl<'a> Segments<'a> {
-    /// `text`, from its `ISA`, walked with `delimiters`, the walk's form of
-    /// `separators`.
-    pub(crate) const fn new(separators: Separators, delimiters: Delimiters, text: &'a str) -> Self {
+    /// `text`, from its `ISA`, walked with `delimiters`, the separators the
+    /// `ISA` declares.
+    pub(crate) const fn new(delimiters: Delimiters, text: &'a str) -> Self {
         Self {
-            separators,
             delimiters,
             text,
             walk: Some(delimiters.walk(text.as_bytes())),
         }
     }
 
-    /// The separators the `ISA` declares.
+    /// The separators the `ISA` declares, as the walk cuts by them.
     #[must_use]
-    pub const fn separators(&self) -> Separators {
-        self.separators
+    pub const fn delimiters(&self) -> Delimiters {
+        self.delimiters
     }
 }
 
