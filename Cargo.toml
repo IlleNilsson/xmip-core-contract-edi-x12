@@ -16,12 +16,14 @@ path = "src/lib.rs"
 [dependencies]
 # A Technology depends on its parent Capability, never the reverse
 # (repository-model.md). The Contract trait and its value types live there.
-# Standard library otherwise: X12 is separators.
 contract = { package = "xmip-core-contract", git = "https://github.com/IlleNilsson/xmip-core-contract", branch = "main" }
 # The settings this technology declares (xcore::settings), read through
 # contract::ContractFactory (ADR-0064, amendment 2026-09-26).
 xcore = { package = "xmip-core", git = "https://github.com/IlleNilsson/xmip-core", branch = "main" }
 stream = { package = "xmip-core-stream", git = "https://github.com/IlleNilsson/xmip-core-stream", branch = "main" }
+# The one segment walk (`message::segment`), which the X12 shape sections
+# by too: the syntax hands it the separators the ISA declares.
+message = { package = "xmip-core-message", git = "https://github.com/IlleNilsson/xmip-core-message", branch = "main" }
 
 [dev-dependencies]
 # The parent's Stream fixture, for the tests only (ADR-0044).
