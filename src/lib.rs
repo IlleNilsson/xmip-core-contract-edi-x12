@@ -20,8 +20,8 @@
 //! repository, as EDIFACT's directories do in its; the segment tables that
 //! would hold a set to its version's structure are the next layer here.
 
+pub mod segments;
 pub mod syntax;
-pub mod walk;
 
 use contract::segment::Segment;
 use contract::{
