@@ -19,26 +19,44 @@
 //! Every X12 version is a version of this one technology and lives in this
 //! repository, as EDIFACT's directories do in its; the segment tables that
 //! would hold a set to its version's structure are the next layer here.
+//!
+//! **Built with its `declaration` feature alone** the crate is
+//! [`declaration`], what a Location naming it is configured with and the
+//! name a Validate step names it by, and none of the code above, which is
+//! behind the default feature: what the surfaces' library carries (ADR-0064,
+//! amendment 2026-11-26).
 
+#[cfg(feature = "declaration")]
+pub mod declaration;
+
+#[cfg(feature = "default")]
 pub mod segments;
+#[cfg(feature = "default")]
 pub mod syntax;
 
+#[cfg(feature = "default")]
 use contract::segment::Segment;
+#[cfg(feature = "default")]
 use contract::{
     Contract, ContractDescriptor, ContractError, ContractFactory, ContractId, ValidationIssue,
     ValidationResult,
 };
+#[cfg(feature = "default")]
 use stream::Stream;
+#[cfg(feature = "default")]
 use syntax::Interchange;
-use xcore::settings::{Applies, Kind, Presence, Setting, Settings};
+#[cfg(feature = "default")]
+use xcore::settings::Settings;
 
 /// The bound transaction set: identifier, and optionally the version.
+#[cfg(feature = "default")]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TransactionSet {
     pub identifier: String,
     pub version: Option<String>,
 }
 
+#[cfg(feature = "default")]
 impl TransactionSet {
     /// `850`, `850:004010`, `837:005010X222A1`.
     ///
@@ -72,11 +90,13 @@ impl TransactionSet {
 }
 
 /// The X12 contract, bare or bound to a transaction set.
+#[cfg(feature = "default")]
 pub struct X12 {
     descriptor: ContractDescriptor,
     transaction_set: Option<TransactionSet>,
 }
 
+#[cfg(feature = "default")]
 impl X12 {
     /// A sound interchange, of any transaction sets.
     #[must_use]
@@ -103,12 +123,14 @@ impl X12 {
     }
 }
 
+#[cfg(feature = "default")]
 impl Default for X12 {
     fn default() -> Self {
         Self::new()
     }
 }
 
+#[cfg(feature = "default")]
 fn descriptor(id: &str) -> ContractDescriptor {
     ContractDescriptor {
         id: ContractId(id.to_string()),
@@ -117,6 +139,7 @@ fn descriptor(id: &str) -> ContractDescriptor {
     }
 }
 
+#[cfg(feature = "default")]
 impl Contract for X12 {
     fn descriptor(&self) -> &ContractDescriptor {
         &self.descriptor
@@ -165,6 +188,7 @@ impl Contract for X12 {
 }
 
 /// Why an `ST` is not the bound set, or `None` when it is.
+#[cfg(feature = "default")]
 fn mismatch(wanted: &TransactionSet, header: &Segment, group: Option<&Segment>) -> Option<String> {
     let identifier = header.simple(1);
     if identifier != wanted.identifier {
@@ -187,15 +211,17 @@ fn mismatch(wanted: &TransactionSet, header: &Segment, group: Option<&Segment>) 
 
 /// Loads the contract a Location names: an empty reference is the bare
 /// contract, anything else a transaction set, `850` or `850:004010`.
+#[cfg(feature = "default")]
 pub struct X12Factory;
 
+#[cfg(feature = "default")]
 impl ContractFactory for X12Factory {
     fn technology(&self) -> &'static str {
-        "edi-x12"
+        declaration::NAME
     }
 
     fn settings(&self) -> &'static Settings {
-        SETTINGS
+        declaration::SETTINGS
     }
 
     fn load(&self, reference: &str) -> Result<Box<dyn Contract>, ContractError> {
@@ -205,18 +231,6 @@ impl ContractFactory for X12Factory {
         Ok(Box::new(X12::of(TransactionSet::parse(reference)?)))
     }
 }
-
-/// What a Location gives this contract (ADR-0064, amendment 2026-09-26).
-const SETTINGS: &Settings = &Settings {
-    technology: env!("CARGO_PKG_NAME"),
-    settings: &[Setting {
-        name: "reference",
-        kind: Kind::Text,
-        presence: Presence::Optional,
-        meaning: "The transaction set, 850 or 850:004010; left out, any interchange holds.",
-        applies: Applies::Both,
-    }],
-};
 
 #[cfg(test)]
 mod tests {
@@ -295,6 +309,8 @@ GE*1*1~IEA*1*000000001~";
 
     #[test]
     fn edi_x12_declares_its_settings_and_reads_through_them() {
+        use declaration::SETTINGS;
+        use xcore::settings::Applies;
         assert!(SETTINGS.problems().is_empty(), "{:?}", SETTINGS.problems());
         let given = |name: &str, value: &str| {
             (
