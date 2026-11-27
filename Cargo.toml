@@ -27,14 +27,10 @@ message = { package = "xmip-core-message", git = "https://github.com/IlleNilsson
 shape = { package = "xmip-core-message-edi-x12", git = "https://github.com/IlleNilsson/xmip-core-message-edi-x12", branch = "main", optional = true }
 
 [features]
-# The technology: its code, everything it is built on, and its declaration.
-# Without it the crate is its declaration alone (ADR-0064, amendments
-# 2026-10-22 and 2026-11-26).
+# The code and its declaration: the contract guide,
+# module/core/capability/contract/doc/adding-a-contract.md.
 default = ["declaration", "dep:contract", "dep:stream", "dep:message", "dep:shape"]
-# The declaration alone: what a Location naming this contract is configured
-# with, `declaration::SETTINGS`, and the name a Validate step's `format`
-# names it by, `NAME`, and none of the code — what the surfaces' library is
-# to carry (open problem 48).
+# The declaration alone.
 declaration = []
 
 [dev-dependencies]
