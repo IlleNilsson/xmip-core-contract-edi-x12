@@ -6,7 +6,7 @@
 //! by position: the element separator is the fourth character, the component
 //! separator the 105th, and the segment terminator the 106th, a line break
 //! among the ones it may be. The X12 shape's one reader of the `ISA` reads
-//! them (`shape::delimiters`), and everything is read with those by the
+//! them (`x12_shape::delimiters`), and everything is read with those by the
 //! Foundation's one segment walk (`message::segment`), the line breaks and
 //! spaces before a segment skipped. What reads one segment cuts only that
 //! one and walks the rest uncut ([`Interchange::walk`], its [`Segments`]), and
@@ -28,7 +28,7 @@ use crate::segments::Segments;
 
 /// The width of each `ISA` element, `ISA01` to `ISA16`, which X12 fixes;
 /// with the tag and the separators they make the shape's
-/// [`ISA_LENGTH`](shape::ISA_LENGTH).
+/// [`ISA_LENGTH`](x12_shape::ISA_LENGTH).
 pub const ISA_WIDTHS: [usize; 16] = [2, 10, 2, 10, 2, 15, 2, 15, 6, 4, 1, 5, 9, 1, 1, 1];
 
 /// The `ISA` elements of type AN, which X12 pads with spaces to their
@@ -73,7 +73,7 @@ impl Interchange {
     /// separators within ASCII.
     pub fn walk(text: &str) -> Result<Segments<'_>, ValidationIssue> {
         let text = text.trim_start();
-        let delimiters = shape::delimiters(text.as_bytes())
+        let delimiters = x12_shape::delimiters(text.as_bytes())
             .map_err(|refused| ValidationIssue::malformed(refused.reason))?;
         Ok(Segments::new(delimiters, text))
     }
@@ -286,7 +286,7 @@ GE*1*1~IEA*1*000000001~";
         assert_eq!(interchange.delimiters().element, b'*');
         assert_eq!(interchange.delimiters().composite, b'>');
         // One reader of the ISA: the shape's, whatever reads the interchange.
-        let declared = shape::delimiters(SOUND.as_bytes()).expect("declared");
+        let declared = x12_shape::delimiters(SOUND.as_bytes()).expect("declared");
         assert_eq!(interchange.delimiters(), declared);
         assert_eq!(interchange.segments().len(), 8);
         assert_eq!(interchange.soundness(), [] as [ValidationIssue; 0]);
@@ -352,7 +352,7 @@ GE*1*1~IEA*1*000000001~";
         interchange.segments_mut()[0].elements[5] = vec!["OTHER".into()];
         let written = interchange.written().expect("padded");
         assert!(written.starts_with("ISA*00*          *00*          *ZZ*OTHER          *"));
-        assert_eq!(written.find('~'), Some(shape::ISA_LENGTH - 1));
+        assert_eq!(written.find('~'), Some(x12_shape::ISA_LENGTH - 1));
         interchange.segments_mut()[0].elements[5] = vec!["A SENDER LONGER THAN 15".into()];
         let refused = interchange.written().expect_err("too wide");
         assert!(refused.contains("ISA06"), "{refused}");
@@ -369,7 +369,7 @@ GE*1*1~IEA*1*000000001~";
         assert!(Interchange::parse("UNB+UNOC:3+A+B'").is_err());
         assert!(Interchange::parse("ISA*00*short~").is_err());
         assert!(
-            Interchange::parse(&SOUND[..shape::ISA_LENGTH - 1]).is_err(),
+            Interchange::parse(&SOUND[..x12_shape::ISA_LENGTH - 1]).is_err(),
             "no terminator"
         );
         let bad_tag = SOUND.replace("BEG*", "b*");
